@@ -66,6 +66,7 @@ public class DNSTester {
 
         // Read the answer section
         for (int i = 0; i < dns_nAns; i++) {
+          int start = bb_in.position();
           int len = (bb_in.get(bb_in.position()) & 0xff);
 
           // Pointer to name another place
@@ -101,8 +102,8 @@ public class DNSTester {
               address[2] = (bb_in.get() & 0xff);
               address[3] = (bb_in.get() & 0xff);
           }
-
-          System.out.println(address[0]+"."+address[1]+"."+address[2]+"."+address[3]);
+          int end = bb_in.position();
+          System.out.println("Data range: "+start+"-"+end+"   "+address[0]+"."+address[1]+"."+address[2]+"."+address[3]);
         }
 
     }
