@@ -5,7 +5,14 @@ import java.nio.ByteBuffer;
 /**
  * Created by student on 27-03-17.
  */
+
+
+
 public class DNSTester {
+
+  private static byte[] PREFIX = {
+    0x20, 0x01, 0x0D, (byte) 0xB8,(byte) 0xAC,
+    (byte) 0x10, (byte) 0xFE, 0x01};
 
   // Converts a value from decimal to hex as from 192 (dec) to 0x192 (hex)
   private static int dec2hex(int dec) {
@@ -80,7 +87,17 @@ public class DNSTester {
 
 
     // Read the answer section
+    int answers_start_position = bb_in.position();
+
+    // It is at this time hard to know how large of a buffer we need,
+    // so a conservative estimate of dns_nAns * current size is used.
+    ByteBuffer answers = ByteBuffer.wrap(new byte[bb_in.limit() * dns_nAns]);
+
+    // Loop over all the answers
     for (int i = 0; i < dns_nAns; i++) {
+      int answer_start = bb_in.position();
+
+      // Get name pos/lenght
       int len = (bb_in.get(bb_in.position()) & 0xff);
 
       // Pointer to name another place
@@ -102,25 +119,104 @@ public class DNSTester {
 
       }
 
+      // Record where the name ends so we can just copy over the bytes
+      int name_end = bb_in.position();
+
       // Read the record type
       short rr_type   = bb_in.getShort();
       short rr_class  = bb_in.getShort();
       int   rr_ttl    = bb_in.getInt();
       int   rr_length = (bb_in.getShort() & 0xffff);
 
-      // Wuhu, this is the actual answer
-      int address[] = new int[4];
-      if (rr_class == 1) { // A record, only thing that we will worry about
-        address[0] = (bb_in.get() & 0xff);
-        address[1] = (bb_in.get() & 0xff);
-        address[2] = (bb_in.get() & 0xff);
-        address[3] = (bb_in.get() & 0xff);
+      // Record the meta data end
+      int meta_end = bb_in.position();
+
+      // Copy in the whole RR, we don't need to edit it as it is not an
+      // A record type RR
+      if(rr_type != 1) {
+        // Read the whole RR and put it in an answer buffer
+        bb_in.position(answer_start);
+        byte buffer[] = new byte[meta_end - answer_start + rr_length];
+        bb_in.get(buffer);
+        answers.put(buffer);
+
+        // Advance the input buffer by the payload length
+        bb_in.position(meta_end + rr_length);
+      }
+      // A record, only thing that we will worry about
+      else {
+        // Copy the name from before (rewind pos, copy, ff pos)
+        bb_in.position(answer_start);
+        byte name_buffer[] = new byte[name_end - answer_start];
+        bb_in.get(name_buffer);
+        answers.put(name_buffer);
+        bb_in.position(meta_end);
+
+        // Set type, class, ttl and length of answer
+        answers.putShort((short) 28); // AAAA type RR
+        answers.putShort(rr_class);
+        answers.putInt(rr_ttl);
+        answers.putShort((short) 16); // Length of IPv6 address in bytes
+
+        // Get the prefix into the buffer as start of the answer
+        answers.put(PREFIX);
+
+        // Read IPv4 address and translate to IPv6 (4 -> 8 bytes)
+        for (int j = 0; j < 4 ; j++ ) {
+          int octet = bb_in.get() & 0xff;
+          int blob  = dec2hex(octet);
+          answers.put((byte) ((blob & 0xff00) >> 8));
+          answers.put((byte) (blob & 0xff));
+          System.out.print(blob+" ");
+        }
+        System.out.println();
       }
 
-      System.out.println(address[0]+"."+address[1]+"."+address[2]+"."+address[3]);
-    }
+    } // Read answers end
+
+    // Finalize the answer buffer
+    answers.flip();
+    int ns_start_pos = bb_in.position();
+
+    // Create new buffer with the new DNS packet
+    ByteBuffer new_pkt = ByteBuffer.wrap(new byte[
+        answers_start_position + answers.limit() +
+        bb_in.limit() - bb_in.position()]);
+
+    // Add the header
+    byte header[] = new byte[answers_start_position];
+    bb_in.position(0);
+    bb_in.get(header);
+    new_pkt.put(header);
+
+    // Add the answers
+    new_pkt.put(answers);
+
+    // Add the NS and additional fields
+    bb_in.position(ns_start_pos);
+    new_pkt.put(bb_in);
+
+    // Finalize the packet
+    new_pkt.flip();
+
+    System.out.println(bytesToHex(bb_in.array()));
+    System.out.println(bytesToHex(new_pkt.array()));
+
+    System.out.println("Old size: "+bb_in.limit()+" New size: "+new_pkt.limit());
 
   }
+
+
+
+  public static String bytesToHex(byte[] in) {
+    final StringBuilder builder = new StringBuilder();
+    for(byte b : in) {
+      builder.append(String.format("%02x", b));
+    }
+    return builder.toString();
+  }
+
+
 
   public static void main(String[] args) {
     DNSTester lars = new DNSTester();
