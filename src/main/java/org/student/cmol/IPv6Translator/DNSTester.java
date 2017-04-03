@@ -7,6 +7,19 @@ import java.nio.ByteBuffer;
  */
 public class DNSTester {
 
+    private static int dec2hex(int dec) {
+        if (dec > 255 || dec < 0) {
+            throw new IllegalArgumentException("Value must be between 0 and 255");
+        }
+        return (dec / 100) * 256 + ((dec % 100) / 10) * 16 + dec % 100 % 10;
+    }
+
+    private static int hex2dec(int hex) {
+        if (hex > 0x255 || hex < 0) {
+            throw new IllegalArgumentException("Value must be between 0 and 0x255 (597)");
+        }
+        return (hex / 256) * 100 + ((hex % 256) / 16) * 10 + hex % 256 % 16;
+    }
 
     DNSTester() {
         byte in_pkt[] = { /* Packet 4 */
@@ -109,6 +122,8 @@ public class DNSTester {
 
     public static void main(String[] args) {
         DNSTester lars = new DNSTester();
+
+        System.out.println(hex2dec(dec2hex(0)));
 
     }
 
