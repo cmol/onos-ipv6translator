@@ -1,4 +1,4 @@
-//package org.student.cmol.IPv6Translator;
+package org.student.cmol.IPv6Translator;
 
 import java.nio.ByteBuffer;
 
