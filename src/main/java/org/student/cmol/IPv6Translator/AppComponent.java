@@ -24,6 +24,8 @@ import org.onosproject.net.packet.PacketService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
+
 /**
  * Skeletal ONOS application component.
  */
@@ -137,7 +139,146 @@ public class AppComponent {
     }
 
     private byte[] rewriteDNS(byte[] payload) {
-        return new byte[1];
+        ByteBuffer bb_in = ByteBuffer.wrap(new byte[payload.length]);
+
+        bb_in.put(payload);
+        bb_in.flip();
+
+        // We don't strictly need all of these, but for now they are nice
+        short dns_id   = bb_in.getShort();
+        short dns_opts = bb_in.getShort();
+        int dns_nQue   = (bb_in.getShort() & 0xff);
+        int dns_nAns   = (bb_in.getShort() & 0xff);
+        int dns_nNS    = (bb_in.getShort() & 0xff);
+        int dns_nAdd   = (bb_in.getShort() & 0xff);
+
+        // Try to read the questions section
+        // Forget about trying to read the name, just skip the thing..
+        for (int i = 0; i < dns_nQue; i++) {
+            while(true) {
+                int len = (bb_in.get() & 0xff);
+                if(len == 0) {break;}
+                else {
+                    bb_in.position(bb_in.position() + len);
+                }
+            }
+            short qtype = bb_in.getShort();
+            short qclass = bb_in.getShort();
+        }
+
+
+        // Read the answer section
+        int answers_start_position = bb_in.position();
+
+        // It is at this time hard to know how large of a buffer we need,
+        // so a conservative estimate of dns_nAns * current size is used.
+        ByteBuffer answers = ByteBuffer.wrap(new byte[bb_in.limit() * dns_nAns]);
+
+        // Loop over all the answers
+        for (int i = 0; i < dns_nAns; i++) {
+            int answer_start = bb_in.position();
+
+            // Get name pos/lenght
+            int len = (bb_in.get(bb_in.position()) & 0xff);
+
+            // Pointer to name another place
+            if (len >= 192) {
+                // Just skip ahead two octets
+                bb_in.position(bb_in.position() + 2);
+            }
+            // Name is here
+            else {
+                // Skip the damn name..
+                bb_in.position(bb_in.position() + len);
+                while(true) {
+                    len = (bb_in.get() & 0xff);
+                    if(len == 0) {break;}
+                    else {
+                        bb_in.position(bb_in.position() + len);
+                    }
+                }
+
+            }
+
+            // Record where the name ends so we can just copy over the bytes
+            int name_end = bb_in.position();
+
+            // Read the record type
+            short rr_type   = bb_in.getShort();
+            short rr_class  = bb_in.getShort();
+            int   rr_ttl    = bb_in.getInt();
+            int   rr_length = (bb_in.getShort() & 0xffff);
+
+            // Record the meta data end
+            int meta_end = bb_in.position();
+
+            // Copy in the whole RR, we don't need to edit it as it is not an
+            // A record type RR
+            if(rr_type != 1) {
+                // Read the whole RR and put it in an answer buffer
+                bb_in.position(answer_start);
+                byte buffer[] = new byte[meta_end - answer_start + rr_length];
+                bb_in.get(buffer);
+                answers.put(buffer);
+
+                // Advance the input buffer by the payload length
+                bb_in.position(meta_end + rr_length);
+            }
+            // A record, only thing that we will worry about
+            else {
+                // Copy the name from before (rewind pos, copy, ff pos)
+                bb_in.position(answer_start);
+                byte name_buffer[] = new byte[name_end - answer_start];
+                bb_in.get(name_buffer);
+                answers.put(name_buffer);
+                bb_in.position(meta_end);
+
+                // Set type, class, ttl and length of answer
+                answers.putShort((short) 28); // AAAA type RR
+                answers.putShort(rr_class);
+                answers.putInt(rr_ttl);
+                answers.putShort((short) 16); // Length of IPv6 address in bytes
+
+                // Get the prefix into the buffer as start of the answer
+                answers.put(PREFIX);
+
+                // Read IPv4 address and translate to IPv6 (4 -> 8 bytes)
+                for (int j = 0; j < 4 ; j++ ) {
+                    int octet = bb_in.get() & 0xff;
+                    int blob  = dec2hex(octet);
+                    answers.put((byte) ((blob & 0xff00) >> 8));
+                    answers.put((byte) (blob & 0xff));
+                }
+            }
+
+        } // Read answers end
+
+        // Finalize the answer buffer
+        answers.flip();
+        int ns_start_pos = bb_in.position();
+
+        // Create new buffer with the new DNS packet
+        ByteBuffer new_pkt = ByteBuffer.wrap(new byte[
+                answers_start_position + answers.limit() +
+                        bb_in.limit() - bb_in.position()]);
+
+        // Add the header
+        byte header[] = new byte[answers_start_position];
+        bb_in.position(0);
+        bb_in.get(header);
+        new_pkt.put(header);
+
+        // Add the answers
+        new_pkt.put(answers);
+
+        // Add the NS and additional fields
+        bb_in.position(ns_start_pos);
+        new_pkt.put(bb_in);
+
+        // Finalize the packet
+        new_pkt.flip();
+
+        return new_pkt.array();
     }
 
     /* ********** Helper methods to make life easier by reuisng code ********** */
