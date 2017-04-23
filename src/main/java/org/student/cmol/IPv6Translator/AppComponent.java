@@ -32,10 +32,19 @@ import java.nio.ByteBuffer;
 @Component(immediate = true)
 public class AppComponent {
 
-    // Translation prefix, must be prefix owned by provider
-    private static byte[] PREFIX = {
+    // Translation prefix, must be prefix owned by provider (2001:0db8:ac10:fe01::)
+    private static byte[] V6_TRANSLATION_PREFIX = {
             0x20, 0x01, 0x0D, (byte) 0xB8,(byte) 0xAC,
             (byte) 0x10, (byte) 0xFE, 0x01};
+
+    // Prefix for direct access to machines owned by provider (2001:0db8:ac10:feff::)
+    private static byte[] V6_DIRECT_PREFIX = {
+            0x20, 0x01, 0x0D, (byte) 0xB8,(byte) 0xAC,
+            (byte) 0x10, (byte) 0xFE, (byte) 0xff};
+
+    // IPv4 addresses owned by provider
+    private static int V4_NET     = 0x0a000000; //10 .  0.  0.0
+    private static int V4_NETMASK = 0xffffff00; //255.255.255.0
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected PacketService packetService;
