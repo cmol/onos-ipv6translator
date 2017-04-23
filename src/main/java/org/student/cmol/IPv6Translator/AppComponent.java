@@ -76,29 +76,51 @@ public class AppComponent {
             log.info("From :"+ethPkt.getSourceMAC().toString());
             log.info("To: "+ethPkt.getDestinationMAC().toString());
 
-            IPv6 ipv6_packet;
-
+            // We are working with IPv4
             if(ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
-                // We need to translate the packet here then.
-                ipv6_packet = (IPv6) (IPacket) ipv4toipv6(ethPkt);
-            }
-            else {
-                // Ok, carry on
-                ipv6_packet = (IPv6) (IPacket) ethPkt;
-            }
 
-            if (ipv6_packet.getNextHeader() == IPv6.PROTOCOL_UDP) {
-                // We need to check if we are working with DNS
-                UDP udp_packet = (UDP) ipv6_packet.getPayload();
-                if (udp_packet.getDestinationPort() == 53) {
-                    // We will assume that we are working with DNS as the destionation is port 53
-                    udp_packet = transformDNS(udp_packet);
+                // We need to translate the packet here if it matches our addresses.
+                if(matchSubnet(((IPv4) ethPkt.getPayload()).getDestinationAddress())) {
+                    IPv6 ipv6_packet = ipv4toipv6(ethPkt);
+                    ipv6_packet = transformDNS(ipv6_packet);
+                    ethPkt.setPayload(ipv6_packet);
                 }
-                ipv6_packet.setPayload(udp_packet);
+
+                // If this packet is not destined to us, just send it on its way.
             }
 
-            ethPkt.setPayload(ipv6_packet);
+            // We are working with IPv6
+            else if(ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+
+                // Match our translation prefix and translate the packet into an IPv4 packet
+                if(matchSubnet(V6_TRANSLATION_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
+                    IPv4 ipv4_packet = ipv6toipv4(ethPkt);
+                    ethPkt.setPayload(ipv4_packet);
+                }
+                // If the IPv6 address is ours, fix DNS and send along
+                else if(matchSubnet(V6_DIRECT_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
+                    IPv6 ipv6_packet = (IPv6) ethPkt.getPayload();
+                    transformDNS(ipv6_packet);
+                    ethPkt.setPayload(ipv6_packet);
+                }
+                // The match is some other prefix, packet is fine as it is
+            }
+
+            // Not IPv4 and not IPv6? Just forward the thing!
         }
+    }
+
+    private IPv6 transformDNS(IPv6 packet) {
+        if (packet.getNextHeader() == IPv6.PROTOCOL_UDP) {
+            // We need to check if we are working with DNS
+            UDP udp_packet = (UDP) packet.getPayload();
+            if (udp_packet.getDestinationPort() == 53) {
+                // We will assume that we are working with DNS as the destionation is port 53
+                udp_packet = transformDNS(udp_packet);
+            }
+            packet.setPayload(udp_packet);
+        }
+        return packet;
     }
 
     private UDP transformDNS(UDP udp_packet) {
@@ -130,7 +152,8 @@ public class AppComponent {
         return udp;
     }
 
-    private Ethernet ipv4toipv6(Ethernet ethPkt) {
+    // Rewrite the packet from v4 to v6
+    private IPv6 ipv4toipv6(Ethernet ethPkt) {
         IPv4 ipv4 = (IPv4) ethPkt.getPayload();
         IPv6 ipv6 = new IPv6();
         int src_addr = ipv4.getSourceAddress();
@@ -140,13 +163,24 @@ public class AppComponent {
         ipv6.setSourceAddress(address4to6(src_addr));
         ipv6.setDestinationAddress(address4to6(dst_addr));
 
-        Ethernet packet;
-        packet = (Ethernet) ethPkt.clone();
-        packet.setPayload(ipv6);
-
-        return packet;
+        return ipv6;
     }
 
+    // Rewrite the packet from v6 to v4
+    private IPv4 ipv6toipv4(Ethernet ethPkt) {
+        IPv6 ipv6 = (IPv6) ethPkt.getPayload();
+        IPv4 ipv4 = new IPv4();
+        byte src_addr[] = ipv6.getSourceAddress();
+        byte dst_addr[] = ipv6.getDestinationAddress();
+
+        ipv4.setPayload(ipv6.getPayload());
+        ipv4.setSourceAddress(address6to4(src_addr));
+        ipv4.setDestinationAddress(address6to4(dst_addr));
+
+        return ipv4;
+    }
+
+    // Parse and if necessary rewrite the DNS packet itself
     private byte[] rewriteDNS(byte[] payload) {
         ByteBuffer bb_in = ByteBuffer.wrap(new byte[payload.length]);
 
@@ -162,7 +196,7 @@ public class AppComponent {
         int dns_nAdd   = (bb_in.getShort() & 0xff);
 
         // Try to read the questions section
-        // Forget about trying to read the name, just skip the thing..
+        // Forget about trying to read the name, just skip the thing as we don't really need it
         for (int i = 0; i < dns_nQue; i++) {
             while(true) {
                 int len = (bb_in.get() & 0xff);
@@ -249,7 +283,7 @@ public class AppComponent {
                 answers.putShort((short) 16); // Length of IPv6 address in bytes
 
                 // Get the prefix into the buffer as start of the answer
-                answers.put(PREFIX);
+                answers.put(V6_TRANSLATION_PREFIX);
 
                 // Read IPv4 address and translate to IPv6 (4 -> 8 bytes)
                 for (int j = 0; j < 4 ; j++ ) {
@@ -320,7 +354,7 @@ public class AppComponent {
         v4arr[3] = (byte) ( addr        & 0xff);
 
         // Copy in translation prefix
-        System.arraycopy(PREFIX,0,v6arr,0,8);
+        System.arraycopy(V6_TRANSLATION_PREFIX,0,v6arr,0,8);
 
         // Translate the single entities and add them to the new v6addr array
         for( int i = 0; i < 4; i++) {
@@ -333,9 +367,10 @@ public class AppComponent {
     }
 
     // Take an ipv6 address as a byte[], and translate to ipv4 byte[]
-    private static byte[] address6to4(byte[] addr) {
+    private static int address6to4(byte[] addr) {
         byte v4arr[] = new byte[4];
         int v6arr[]  = new int[4];
+        int v4ret;
 
         // Extract shorts (to ints) of v6 address
         v6arr[0] = ((addr[8]  << 8) & (addr[9]));
@@ -345,12 +380,32 @@ public class AppComponent {
 
         // Translate the single entities and add them to the new v4addr array
         for( int i = 0; i < 4; i++) {
-            v4arr[i] = (byte) ( hex2dec(v6arr[i]) & 0xff);
+            v4arr[i] = (byte) ( hex2dec(v6arr[i]) & 0xff );
         }
 
-        return v4arr;
+        // Recontruct the v4 address int
+        v4ret = v4arr[0] << 24 |
+                v4arr[1] << 16 |
+                v4arr[2] << 16 |
+                v4arr[3];
+
+        return v4ret;
     }
 
+    // Match v4 subnet
+    private static boolean matchSubnet(int addr) {
+        return (addr & V4_NETMASK) == V4_NET;
+    }
 
-
+    // Match v6 subnet
+    private static boolean matchSubnet(byte subnet[], byte addr[]) {
+        return addr[0] == subnet[0] &&
+                addr[1] == subnet[1] &&
+                addr[2] == subnet[2] &&
+                addr[3] == subnet[3] &&
+                addr[4] == subnet[4] &&
+                addr[5] == subnet[5] &&
+                addr[6] == subnet[6] &&
+                addr[7] == subnet[7];
+    }
 }
