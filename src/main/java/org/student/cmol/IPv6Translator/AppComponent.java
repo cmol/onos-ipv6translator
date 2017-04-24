@@ -17,11 +17,15 @@ package org.student.cmol.IPv6Translator;
 
 import org.apache.felix.scr.annotations.*;
 import org.onlab.packet.*;
+import org.onosproject.net.PortNumber;
+import org.onosproject.net.flow.DefaultTrafficTreatment;
+import org.onosproject.net.flow.TrafficTreatment;
 import org.onosproject.net.packet.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /**
  * Skeletal ONOS application component.
@@ -43,6 +47,16 @@ public class AppComponent {
     private static int V4_NET     = 0x0a000000; //10 .  0.  0.0
     private static int V4_NETMASK = 0xffffff00; //255.255.255.0
 
+    // Address of whitelisted DNS server
+    private static byte[] DNS_WHITELIST = {
+            0x20, 0x01, 0x0D, (byte) 0xB8,
+            (byte) 0xAC, (byte) 0x10, (byte) 0xFE, (byte) 0xff,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x53};
+
+    // Configs of translation device
+    private static int OUTSIDE_PORT = 1;
+    private static int INSIDE_PORT  = 2;
+
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected PacketService packetService;
     private final Logger log = LoggerFactory.getLogger(getClass());
@@ -50,7 +64,7 @@ public class AppComponent {
     @Activate
     protected void activate() {
         log.info("Started");
-        packetService.addProcessor(processor,PacketProcessor.director(2));
+        packetService.addProcessor(processor,PacketProcessor.director(1));
     }
 
     @Deactivate
@@ -74,15 +88,22 @@ public class AppComponent {
             log.info("From :"+ethPkt.getSourceMAC().toString());
             log.info("To: "+ethPkt.getDestinationMAC().toString());
 
+            // Select where we are sending the traffic
+            int port;
+
             // We are working with IPv4
             if(ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
 
                 // We need to translate the packet here if it matches our addresses.
-                if(matchSubnet(((IPv4) ethPkt.getPayload()).getDestinationAddress())) {
+                /* TODO: Right now we are only having a single translation unit, and with that, we can only
+                   have a single v4 subnet accessed, so this check can be disabled for now.
+                */
+                //if(matchSubnet(((IPv4) ethPkt.getPayload()).getDestinationAddress())) {
                     IPv6 ipv6_packet = ipv4toipv6(ethPkt);
                     ipv6_packet = transformDNS(ipv6_packet);
                     ethPkt.setPayload(ipv6_packet);
-                }
+                //}
+                port = INSIDE_PORT;
 
                 // If this packet is not destined to us, just send it on its way.
             }
@@ -94,27 +115,41 @@ public class AppComponent {
                 if(matchSubnet(V6_TRANSLATION_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
                     IPv4 ipv4_packet = ipv6toipv4(ethPkt);
                     ethPkt.setPayload(ipv4_packet);
+                    port = OUTSIDE_PORT;
                 }
                 // If the IPv6 address is ours, fix DNS and send along
                 else if(matchSubnet(V6_DIRECT_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
+
+                    // If the source address is our whitelisted DNS, we can let ONOS handle the rest from here.
+                    // Having ONOS itself install a rule for whitelisted DNS.
+                    if (Arrays.equals(((IPv6) ethPkt.getPayload()).getSourceAddress(), DNS_WHITELIST)) {return;}
+
+                    // The packet is not from whitelist, check up on DNS
                     IPv6 ipv6_packet = (IPv6) ethPkt.getPayload();
-                    transformDNS(ipv6_packet);
+                    ipv6_packet = transformDNS(ipv6_packet);
                     ethPkt.setPayload(ipv6_packet);
+                    port = INSIDE_PORT;
                 }
-                // The match is some other prefix, packet is fine as it is
+                // The match is some other prefix, packet is fine as it is so ONOS will handle the packet and hopefully
+                // install the flows as needed.
+                else {return;}
             }
+
+            // We are neither working with IPv4 or IPv6, so for now ONOS will handle the packets
+            else {return;}
 
             // Generate the packet to be send out the interface
             byte packet_array[] = ethPkt.serialize();
             ByteBuffer new_pkt = ByteBuffer.wrap(new byte[packet_array.length]);
             new_pkt.get(packet_array);
             new_pkt.flip();
+            TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+                    .setOutput(PortNumber.portNumber(port))
+                    .build();
 
-            OutboundPacket out = new DefaultOutboundPacket(out_packet.sendThrough(), out_packet.treatment(), new_pkt);
+            packetService.emit(new DefaultOutboundPacket(out_packet.sendThrough(), treatment, new_pkt));
+            packetContext.block();
 
-            packetService.emit(out);
-
-            // Not IPv4 and not IPv6? Just forward the thing!
         }
     }
 
