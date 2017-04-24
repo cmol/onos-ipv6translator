@@ -91,7 +91,7 @@ public class AppComponent {
             // Select where we are sending the traffic
             int port;
 
-            // We are working with IPv4
+            // We are working with IPv4, rewrite
             if(ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
 
                 // We need to translate the packet here if it matches our addresses.
@@ -99,14 +99,14 @@ public class AppComponent {
                    have a single v4 subnet accessed, so this check can be disabled for now.
                 */
                 //if(matchSubnet(((IPv4) ethPkt.getPayload()).getDestinationAddress())) {
-                    IPv6 ipv6_packet = ipv4toipv6(ethPkt);
+                
+                IPv6 ipv6_packet = ipv4toipv6(ethPkt);
 
-                    // Rewrite DNS if we need to
-                    if (isDNS(ipv6_packet)) {
-                        ipv6_packet = transformDNS(ipv6_packet);
-                    }
-                    ethPkt.setPayload(ipv6_packet);
-                //}
+                // Rewrite DNS if we need to
+                if (isDNS(ipv6_packet)) {
+                    ipv6_packet = transformDNS(ipv6_packet);
+                }
+                ethPkt.setPayload(ipv6_packet);
                 port = INSIDE_PORT;
 
                 // If this packet is not destined to us, just send it on its way.
