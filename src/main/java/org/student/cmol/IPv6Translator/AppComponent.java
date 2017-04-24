@@ -142,11 +142,11 @@ public class AppComponent {
         // Assemble new packet
         byte new_packet[] = new byte[rewritten.length + 8];
         System.arraycopy(rewritten, 0, new_packet, 8, rewritten.length);
-        new_packet[0] = (byte) ((udp_packet.getSourcePort()      << 8) & 0xff); // SRC port
+        new_packet[0] = (byte) ((udp_packet.getSourcePort()      >> 8) & 0xff); // SRC port
         new_packet[1] = (byte) ((udp_packet.getSourcePort()          ) & 0xff); // SRC port
-        new_packet[2] = (byte) ((udp_packet.getDestinationPort() << 8) & 0xff); // DST port
+        new_packet[2] = (byte) ((udp_packet.getDestinationPort() >> 8) & 0xff); // DST port
         new_packet[3] = (byte) ((udp_packet.getDestinationPort()     ) & 0xff); // DST port
-        new_packet[4] = (byte) (((rewritten.length + 8)         << 8) & 0xff); // PKT length
+        new_packet[4] = (byte) (((rewritten.length + 8)         >> 8) & 0xff); // PKT length
         new_packet[5] = (byte) (((rewritten.length + 8)             ) & 0xff); // PKT length
         new_packet[6] = 0; // Checksum
         new_packet[7] = 0; // Checksum
