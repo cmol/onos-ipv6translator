@@ -17,10 +17,7 @@ package org.student.cmol.IPv6Translator;
 
 import org.apache.felix.scr.annotations.*;
 import org.onlab.packet.*;
-import org.onosproject.net.packet.InboundPacket;
-import org.onosproject.net.packet.PacketContext;
-import org.onosproject.net.packet.PacketProcessor;
-import org.onosproject.net.packet.PacketService;
+import org.onosproject.net.packet.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,6 +65,7 @@ public class AppComponent {
         @Override
         public void process(PacketContext packetContext) {
             InboundPacket packet = packetContext.inPacket();
+            OutboundPacket out_packet = packetContext.outPacket();
             Ethernet ethPkt = packet.parsed();
             if (ethPkt == null) return;
 
@@ -105,6 +103,16 @@ public class AppComponent {
                 }
                 // The match is some other prefix, packet is fine as it is
             }
+
+            // Generate the packet to be send out the interface
+            byte packet_array[] = ethPkt.serialize();
+            ByteBuffer new_pkt = ByteBuffer.wrap(new byte[packet_array.length]);
+            new_pkt.get(packet_array);
+            new_pkt.flip();
+
+            OutboundPacket out = new DefaultOutboundPacket(out_packet.sendThrough(), out_packet.treatment(), new_pkt);
+
+            packetService.emit(out);
 
             // Not IPv4 and not IPv6? Just forward the thing!
         }
