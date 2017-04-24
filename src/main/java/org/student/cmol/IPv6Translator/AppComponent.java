@@ -143,10 +143,13 @@ public class AppComponent {
             ByteBuffer new_pkt = ByteBuffer.wrap(new byte[packet_array.length]);
             new_pkt.get(packet_array);
             new_pkt.flip();
+
+            // Set the interface for which the packet is to be sent on
             TrafficTreatment treatment = DefaultTrafficTreatment.builder()
                     .setOutput(PortNumber.portNumber(port))
                     .build();
 
+            // Send packet and make sure the context is not reworking the packet another place in the onos stack
             packetService.emit(new DefaultOutboundPacket(out_packet.sendThrough(), treatment, new_pkt));
             packetContext.block();
 
