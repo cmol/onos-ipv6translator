@@ -100,7 +100,11 @@ public class AppComponent {
                 */
                 //if(matchSubnet(((IPv4) ethPkt.getPayload()).getDestinationAddress())) {
                     IPv6 ipv6_packet = ipv4toipv6(ethPkt);
-                    ipv6_packet = transformDNS(ipv6_packet);
+
+                    // Rewrite DNS if we need to
+                    if (isDNS(ipv6_packet)) {
+                        ipv6_packet = transformDNS(ipv6_packet);
+                    }
                     ethPkt.setPayload(ipv6_packet);
                 //}
                 port = INSIDE_PORT;
@@ -120,12 +124,17 @@ public class AppComponent {
                 // If the IPv6 address is ours, fix DNS and send along
                 else if(matchSubnet(V6_DIRECT_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
 
+                    IPv6 ipv6_packet = (IPv6) ethPkt.getPayload();
+
                     // If the source address is our whitelisted DNS, we can let ONOS handle the rest from here.
                     // Having ONOS itself install a rule for whitelisted DNS.
-                    if (Arrays.equals(((IPv6) ethPkt.getPayload()).getSourceAddress(), DNS_WHITELIST)) {return;}
+                    if (Arrays.equals(ipv6_packet.getSourceAddress(), DNS_WHITELIST)) {return;}
 
                     // The packet is not from whitelist, check up on DNS
-                    IPv6 ipv6_packet = (IPv6) ethPkt.getPayload();
+                    // If we are not working with DNS, pass the packet through the ONOS stack
+                    if (!isDNS(ipv6_packet)) {return;}
+
+                    // The packet needs to have its DNS payload fixed (possibly)
                     ipv6_packet = transformDNS(ipv6_packet);
                     ethPkt.setPayload(ipv6_packet);
                     port = INSIDE_PORT;
@@ -156,16 +165,23 @@ public class AppComponent {
         }
     }
 
-    private IPv6 transformDNS(IPv6 packet) {
+    private boolean isDNS(IPv6 packet) {
         if (packet.getNextHeader() == IPv6.PROTOCOL_UDP) {
-            // We need to check if we are working with DNS
             UDP udp_packet = (UDP) packet.getPayload();
-            if (udp_packet.getDestinationPort() == 53) {
-                // We will assume that we are working with DNS as the destionation is port 53
-                udp_packet = transformDNS(udp_packet);
-            }
-            packet.setPayload(udp_packet);
+            // We are assuming that we are working with DNS as we are on port 53 and are on UDP.
+            // (Yes, you ca do DNS over TCP but it's mostly AXFR, so we'll simplify for now)
+            return udp_packet.getSourcePort() == 53 || udp_packet.getDestinationPort() == 53;
         }
+        return false;
+    }
+
+    private IPv6 transformDNS(IPv6 packet) {
+        // We need to check if we are working with DNS
+        UDP udp_packet = (UDP) packet.getPayload();
+        // We will assume that we are working with DNS as the destionation is port 53
+        udp_packet = transformDNS(udp_packet);
+
+        packet.setPayload(udp_packet);
         return packet;
     }
 
