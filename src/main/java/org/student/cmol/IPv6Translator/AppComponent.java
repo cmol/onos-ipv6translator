@@ -93,6 +93,7 @@ public class AppComponent {
 
             // We are working with IPv4, rewrite
             if(ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+                log.info("Type: IPv4, rewrite");
 
                 // We need to translate the packet here if it matches our addresses.
                 /* TODO: Right now we are only having a single translation unit, and with that, we can only
@@ -102,8 +103,18 @@ public class AppComponent {
                 
                 IPv6 ipv6_packet = ipv4toipv6(ethPkt);
 
+                byte address[] = ipv6_packet.getDestinationAddress();
+                String str = "";
+
+                for (byte b: address) {
+                    str += String.format("%02X ", b) + "-";
+                }
+
+                log.info("New address: " + str);
+
                 // Rewrite DNS if we need to
                 if (isDNS(ipv6_packet)) {
+                    log.info("We are working with DNS, rewrite");
                     ipv6_packet = transformDNS(ipv6_packet);
                 }
                 ethPkt.setPayload(ipv6_packet);
@@ -166,6 +177,17 @@ public class AppComponent {
     }
 
     private boolean isDNS(IPv6 packet) {
+        if (packet.getPayload().getClass() == UDP.class) {
+            log.info("UDP packet");
+            UDP udp_packet = (UDP) packet.getPayload();
+            // We are assuming that we are working with DNS as we are on port 53 and are on UDP.
+            // (Yes, you ca do DNS over TCP but it's mostly AXFR, so we'll simplify for now)
+            return udp_packet.getSourcePort() == 53 || udp_packet.getDestinationPort() == 53;
+        }
+        log.info("Check for DNS, next header: " + packet.getNextHeader());
+        if (packet.getNextHeader() == IPv6.PROTOCOL_TCP) { return false;}
+        if (packet.getNextHeader() == IPv6.PROTOCOL_ICMP6) { return false;}
+        if (packet.getNextHeader() == IPv6.PROTOCOL_HOPOPT) { return isDNS((IPv6) packet.getPayload());}
         if (packet.getNextHeader() == IPv6.PROTOCOL_UDP) {
             UDP udp_packet = (UDP) packet.getPayload();
             // We are assuming that we are working with DNS as we are on port 53 and are on UDP.
@@ -192,6 +214,7 @@ public class AppComponent {
         System.arraycopy(packet, 8, dns_packet, 0, dns_packet.length);
 
         byte rewritten[] = rewriteDNS(dns_packet);
+        log.info("New DNS packet:" + bytesToHex(rewritten));
 
         // Assemble new packet
         byte new_packet[] = new byte[rewritten.length + 8];
@@ -469,5 +492,13 @@ public class AppComponent {
                 addr[5] == subnet[5] &&
                 addr[6] == subnet[6] &&
                 addr[7] == subnet[7];
+    }
+
+    public static String bytesToHex(byte[] in) {
+        final StringBuilder builder = new StringBuilder();
+        for(byte b : in) {
+            builder.append(String.format("%02x", b));
+        }
+        return builder.toString();
     }
 }
