@@ -104,11 +104,7 @@ public class AppComponent {
                 IPv6 ipv6_packet = ipv4toipv6(ethPkt);
 
                 byte address[] = ipv6_packet.getDestinationAddress();
-                String str = "";
-
-                for (byte b: address) {
-                    str += String.format("%02X ", b) + "-";
-                }
+                String str = bytesToHex(address);
 
                 log.info("New address: " + str);
 
@@ -116,8 +112,10 @@ public class AppComponent {
                 if (isDNS(ipv6_packet)) {
                     log.info("We are working with DNS, rewrite");
                     ipv6_packet = transformDNS(ipv6_packet);
+                    log.info("New IPv6 packet: "+ bytesToHex(ipv6_packet.serialize()));
                 }
                 ethPkt.setPayload(ipv6_packet);
+                log.info("New eth frame: "+ bytesToHex(ethPkt.serialize()));
                 port = INSIDE_PORT;
 
                 // If this packet is not destined to us, just send it on its way.
@@ -160,17 +158,17 @@ public class AppComponent {
 
             // Generate the packet to be send out the interface
             byte packet_array[] = ethPkt.serialize();
-            ByteBuffer new_pkt = ByteBuffer.wrap(new byte[packet_array.length]);
-            new_pkt.get(packet_array);
-            new_pkt.flip();
+            ByteBuffer new_pkt = ByteBuffer.wrap(packet_array);
 
             // Set the interface for which the packet is to be sent on
             TrafficTreatment treatment = DefaultTrafficTreatment.builder()
                     .setOutput(PortNumber.portNumber(port))
                     .build();
 
+            log.info("Output new packet from device: " + packet.receivedFrom().deviceId().toString() + " , on port: " + port);
+
             // Send packet and make sure the context is not reworking the packet another place in the onos stack
-            packetService.emit(new DefaultOutboundPacket(out_packet.sendThrough(), treatment, new_pkt));
+            packetService.emit(new DefaultOutboundPacket(packet.receivedFrom().deviceId(), treatment, new_pkt));
             packetContext.block();
 
         }
@@ -202,6 +200,7 @@ public class AppComponent {
         UDP udp_packet = (UDP) packet.getPayload();
         // We will assume that we are working with DNS as the destionation is port 53
         udp_packet = transformDNS(udp_packet);
+        log.info("New UDP packet: "+ bytesToHex(udp_packet.serialize()));
 
         packet.setPayload(udp_packet);
         return packet;
@@ -244,6 +243,10 @@ public class AppComponent {
         int src_addr = ipv4.getSourceAddress();
         int dst_addr = ipv4.getDestinationAddress();
 
+        // So, this is kind of not great to do, as only ICMP,IGMP,TCP,UDP and PIM are handeled here,
+        // but for now we will just steal the header type from here..
+        ipv6.setNextHeader(ipv4.getProtocol());
+
         ipv6.setPayload(ipv4.getPayload());
         ipv6.setSourceAddress(address4to6(src_addr));
         ipv6.setDestinationAddress(address4to6(dst_addr));
@@ -257,6 +260,9 @@ public class AppComponent {
         IPv4 ipv4 = new IPv4();
         byte src_addr[] = ipv6.getSourceAddress();
         byte dst_addr[] = ipv6.getDestinationAddress();
+
+        // This kind of breaks anything that is not TCP or UDP, but ok..
+        ipv4.setProtocol(ipv6.getNextHeader());
 
         ipv4.setPayload(ipv6.getPayload());
         ipv4.setSourceAddress(address6to4(src_addr));
