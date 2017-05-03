@@ -100,7 +100,7 @@ public class AppComponent {
                    have a single v4 subnet accessed, so this check can be disabled for now.
                 */
                 //if(matchSubnet(((IPv4) ethPkt.getPayload()).getDestinationAddress())) {
-                
+
                 IPv6 ipv6_packet = ipv4toipv6(ethPkt);
 
                 byte address[] = ipv6_packet.getDestinationAddress();
@@ -124,11 +124,14 @@ public class AppComponent {
             // We are working with IPv6
             else if(ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
 
+                log.info("IPv6 frame recieved to:" + bytesToHex(((IPv6) ethPkt.getPayload()).getDestinationAddress()));
+
                 // Match our translation prefix and translate the packet into an IPv4 packet
                 if(matchSubnet(V6_TRANSLATION_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
                     IPv4 ipv4_packet = ipv6toipv4(ethPkt);
                     ethPkt.setPayload(ipv4_packet);
                     port = OUTSIDE_PORT;
+                    ethPkt.setEtherType(Ethernet.TYPE_IPV4);
                 }
                 // If the IPv6 address is ours, fix DNS and send along
                 else if(matchSubnet(V6_DIRECT_PREFIX, ((IPv6) ethPkt.getPayload()).getDestinationAddress())) {
@@ -262,7 +265,7 @@ public class AppComponent {
         byte dst_addr[] = ipv6.getDestinationAddress();
 
         // This kind of breaks anything that is not TCP or UDP, but ok..
-        ipv4.setProtocol(ipv6.getNextHeader());
+        //ipv4.setProtocol(ipv6.getNextHeader());
 
         ipv4.setPayload(ipv6.getPayload());
         ipv4.setSourceAddress(address6to4(src_addr));
@@ -427,9 +430,9 @@ public class AppComponent {
 
     // Converts a value from hex to decimal as from 0x192 (hex) to 192 (dec)
     private static int hex2dec(int hex) {
-        if (hex > 0x255 || hex < 0) {
-            throw new IllegalArgumentException("Value must be between 0 and 0x255 (597)");
-        }
+        //if (hex > 0x255 || hex < 0) {
+        //    throw new IllegalArgumentException("Value must be between 0 and 0x255 (597) and is: " + hex);
+        //}
         return (hex / 256) * 100 + ((hex % 256) / 16) * 10 + hex % 256 % 16;
     }
 
@@ -458,20 +461,24 @@ public class AppComponent {
     }
 
     // Take an ipv6 address as a byte[], and translate to ipv4 byte[]
-    private static int address6to4(byte[] addr) {
+    private int address6to4(byte[] addr) {
         byte v4arr[] = new byte[4];
         int v6arr[]  = new int[4];
         int v4ret;
 
+        log.info("Address to translate: " + bytesToHex(addr));
+
         // Extract shorts (to ints) of v6 address
-        v6arr[0] = ((addr[8]  << 8) & (addr[9]));
-        v6arr[1] = ((addr[10] << 8) & (addr[11]));
-        v6arr[2] = ((addr[12] << 8) & (addr[13]));
-        v6arr[3] = ((addr[14] << 8) & (addr[15]));
+        v6arr[0] = ((addr[8]  << 8) | (addr[9]));
+        v6arr[1] = ((addr[10] << 8) | (addr[11]));
+        v6arr[2] = ((addr[12] << 8) | (addr[13]));
+        v6arr[3] = ((addr[14] << 8) | (addr[15]));
+
+        log.info("Translation:" + v6arr[0] + " " + v6arr[1] + " " + v6arr[2] + " " + v6arr[3]);
 
         // Translate the single entities and add them to the new v4addr array
         for( int i = 0; i < 4; i++) {
-            v4arr[i] = (byte) ( hex2dec(v6arr[i]) & 0xff );
+            v4arr[i] = (byte) ( hex2dec(v6arr[i]) );
         }
 
         // Recontruct the v4 address int
