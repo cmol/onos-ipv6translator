@@ -270,6 +270,7 @@ public class AppComponent {
         ipv4.setPayload(ipv6.getPayload());
         ipv4.setSourceAddress(address6to4(src_addr));
         ipv4.setDestinationAddress(address6to4(dst_addr));
+        ipv4.setTtl((byte) 127);
 
         return ipv4;
     }
